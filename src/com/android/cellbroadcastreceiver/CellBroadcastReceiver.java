@@ -27,7 +27,6 @@ import android.os.UserHandle;
 import android.preference.PreferenceManager;
 import android.provider.Telephony;
 import android.telephony.CellBroadcastMessage;
-import android.telephony.MSimTelephonyManager;
 import android.telephony.PhoneStateListener;
 import android.telephony.ServiceState;
 import android.telephony.TelephonyManager;
@@ -35,9 +34,7 @@ import android.telephony.cdma.CdmaSmsCbProgramData;
 import android.util.Log;
 
 import com.android.internal.telephony.ITelephony;
-import com.android.internal.telephony.MSimConstants;
 import com.android.internal.telephony.cdma.sms.SmsEnvelope;
-import com.android.internal.telephony.msim.ITelephonyMSim;
 
 public class CellBroadcastReceiver extends BroadcastReceiver {
     private static final String TAG = "CellBroadcastReceiver";
@@ -45,7 +42,6 @@ public class CellBroadcastReceiver extends BroadcastReceiver {
 
     private static final String GET_LATEST_CB_AREA_INFO_ACTION =
             "android.cellbroadcastreceiver.GET_LATEST_CB_AREA_INFO";
-    private int mSubscription = MSimConstants.DEFAULT_SUBSCRIPTION;
 
     @Override
     public void onReceive(Context context, Intent intent) {
@@ -59,31 +55,15 @@ public class CellBroadcastReceiver extends BroadcastReceiver {
 
         if (Intent.ACTION_BOOT_COMPLETED.equals(action)) {
             if (DBG) log("Registering for ServiceState updates");
-            if (MSimTelephonyManager.getDefault().isMultiSimEnabled()) {
-                MSimTelephonyManager msimTm = (MSimTelephonyManager)
-                        context.getSystemService(Context.MSIM_TELEPHONY_SERVICE);;
-                int numPhones = MSimTelephonyManager.getDefault().getPhoneCount();
-                for (int i = 0; i < numPhones; i++) {
-                    msimTm.listen(new ServiceStateListener(context.getApplicationContext(), i),
-                            PhoneStateListener.LISTEN_SERVICE_STATE);
-                }
-            } else {
-                TelephonyManager tm = (TelephonyManager) context.getSystemService(
-                        Context.TELEPHONY_SERVICE);
-                tm.listen(new ServiceStateListener(context.getApplicationContext()),
-                        PhoneStateListener.LISTEN_SERVICE_STATE);
-            }
+            TelephonyManager tm = (TelephonyManager) context.getSystemService(
+                    Context.TELEPHONY_SERVICE);
+            tm.listen(new ServiceStateListener(context.getApplicationContext()),
+                    PhoneStateListener.LISTEN_SERVICE_STATE);
         } else if (Intent.ACTION_AIRPLANE_MODE_CHANGED.equals(action)) {
             boolean airplaneModeOn = intent.getBooleanExtra("state", false);
             if (DBG) log("airplaneModeOn: " + airplaneModeOn);
             if (!airplaneModeOn) {
-                if (MSimTelephonyManager.getDefault().isMultiSimEnabled()) {
-                    for (int i = 0; i < MSimTelephonyManager.getDefault().getPhoneCount(); i++){
-                        startConfigService(context, i);
-                    }
-                } else {
-                    startConfigService(context);
-                }
+                startConfigService(context);
             }
         } else if (Telephony.Sms.Intents.SMS_EMERGENCY_CB_RECEIVED_ACTION.equals(action) ||
                 Telephony.Sms.Intents.SMS_CB_RECEIVED_ACTION.equals(action)) {
@@ -100,9 +80,6 @@ public class CellBroadcastReceiver extends BroadcastReceiver {
         } else if (Telephony.Sms.Intents.SMS_SERVICE_CATEGORY_PROGRAM_DATA_RECEIVED_ACTION
                 .equals(action)) {
             if (privileged) {
-                mSubscription = intent.getIntExtra(MSimConstants.SUBSCRIPTION_KEY,
-                    MSimConstants.SUB1);
-                Log.d(TAG, "onReceive SMS_CATEGORY_PROGRAM_DATA mSubscription :" + mSubscription);
                 CdmaSmsCbProgramData[] programDataList = (CdmaSmsCbProgramData[])
                         intent.getParcelableArrayExtra("program_data_list");
                 if (programDataList != null) {
@@ -115,8 +92,7 @@ public class CellBroadcastReceiver extends BroadcastReceiver {
             }
         } else if (GET_LATEST_CB_AREA_INFO_ACTION.equals(action)) {
             if (privileged) {
-                int subId = intent.getIntExtra(MSimConstants.SUBSCRIPTION_KEY, 0);
-                CellBroadcastMessage message = CellBroadcastReceiverApp.getLatestAreaInfo(subId);
+                CellBroadcastMessage message = CellBroadcastReceiverApp.getLatestAreaInfo();
                 if (message != null) {
                     Intent areaInfoIntent = new Intent(
                             CellBroadcastAlertService.CB_AREA_INFO_RECEIVED_ACTION);
@@ -170,30 +146,34 @@ public class CellBroadcastReceiver extends BroadcastReceiver {
 
     private void tryCdmaSetCategory(Context context, int category, boolean enable) {
         SharedPreferences sharedPrefs = PreferenceManager.getDefaultSharedPreferences(context);
-        String key = null;
 
         switch (category) {
             case SmsEnvelope.SERVICE_CATEGORY_CMAS_EXTREME_THREAT:
-                key = CellBroadcastSettings.KEY_ENABLE_CMAS_EXTREME_THREAT_ALERTS + mSubscription;
+                sharedPrefs.edit().putBoolean(
+                        CellBroadcastSettings.KEY_ENABLE_CMAS_EXTREME_THREAT_ALERTS, enable)
+                        .apply();
                 break;
 
             case SmsEnvelope.SERVICE_CATEGORY_CMAS_SEVERE_THREAT:
-                key = CellBroadcastSettings.KEY_ENABLE_CMAS_SEVERE_THREAT_ALERTS + mSubscription;
+                sharedPrefs.edit().putBoolean(
+                        CellBroadcastSettings.KEY_ENABLE_CMAS_SEVERE_THREAT_ALERTS, enable)
+                        .apply();
                 break;
 
             case SmsEnvelope.SERVICE_CATEGORY_CMAS_CHILD_ABDUCTION_EMERGENCY:
-                key = CellBroadcastSettings.KEY_ENABLE_CMAS_AMBER_ALERTS + mSubscription;
+                sharedPrefs.edit().putBoolean(
+                        CellBroadcastSettings.KEY_ENABLE_CMAS_AMBER_ALERTS, enable).apply();
                 break;
 
             case SmsEnvelope.SERVICE_CATEGORY_CMAS_TEST_MESSAGE:
-                key = CellBroadcastSettings.KEY_ENABLE_CMAS_TEST_ALERTS + mSubscription;
+                sharedPrefs.edit().putBoolean(
+                        CellBroadcastSettings.KEY_ENABLE_CMAS_TEST_ALERTS, enable).apply();
                 break;
 
             default:
                 Log.w(TAG, "Ignoring SCPD command to " + (enable ? "enable" : "disable")
                         + " alerts in category " + category);
         }
-        if (null != key) sharedPrefs.edit().putBoolean(key, enable).apply();
     }
 
     /**
@@ -206,32 +186,15 @@ public class CellBroadcastReceiver extends BroadcastReceiver {
         context.startService(serviceIntent);
     }
 
-    static void startConfigService(Context context, int subscription) {
-        Intent serviceIntent = new Intent(CellBroadcastConfigService.ACTION_ENABLE_CHANNELS, null,
-                context, CellBroadcastConfigService.class);
-        serviceIntent.putExtra(MSimConstants.SUBSCRIPTION_KEY, subscription);
-        context.startService(serviceIntent);
-    }
-
     /**
      * @return true if the phone is a CDMA phone type
      */
-    static boolean phoneIsCdma(int subscription) {
+    static boolean phoneIsCdma() {
         boolean isCdma = false;
         try {
-            if (MSimTelephonyManager.getDefault().isMultiSimEnabled()) {
-                ITelephonyMSim phoneMsim = ITelephonyMSim.Stub.asInterface(
-                        ServiceManager.checkService("phone_msim"));
-                if (phoneMsim != null) {
-                    isCdma = (phoneMsim.getActivePhoneType(subscription) ==
-                            TelephonyManager.PHONE_TYPE_CDMA);
-                }
-            } else {
-                ITelephony phone = ITelephony.Stub.asInterface(
-                        ServiceManager.checkService("phone"));
-                if (phone != null) {
-                    isCdma = (phone.getActivePhoneType() == TelephonyManager.PHONE_TYPE_CDMA);
-                }
+            ITelephony phone = ITelephony.Stub.asInterface(ServiceManager.checkService("phone"));
+            if (phone != null) {
+                isCdma = (phone.getActivePhoneType() == TelephonyManager.PHONE_TYPE_CDMA);
             }
         } catch (RemoteException e) {
             Log.w(TAG, "phone.getActivePhoneType() failed", e);
@@ -247,11 +210,6 @@ public class CellBroadcastReceiver extends BroadcastReceiver {
             mContext = context;
         }
 
-        ServiceStateListener(Context context, int subscription) {
-            mContext = context;
-            mSubscription = subscription;
-        }
-
         @Override
         public void onServiceStateChanged(ServiceState ss) {
             int newState = ss.getState();
@@ -260,12 +218,7 @@ public class CellBroadcastReceiver extends BroadcastReceiver {
                 mServiceState = newState;
                 if (newState == ServiceState.STATE_IN_SERVICE ||
                         newState == ServiceState.STATE_EMERGENCY_ONLY) {
-                    if (MSimTelephonyManager.getDefault().isMultiSimEnabled()) {
-                        Log.d(TAG, "Service state changed for Subscription: " + mSubscription);
-                        startConfigService(mContext, mSubscription);
-                    } else {
-                        startConfigService(mContext);
-                    }
+                    startConfigService(mContext);
                 }
             }
         }
