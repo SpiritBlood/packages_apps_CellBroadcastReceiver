@@ -326,8 +326,7 @@ public class CellBroadcastAlertService extends Service {
         } else {
             // For other alerts, vibration can be disabled in app settings.
             audioIntent.putExtra(CellBroadcastAlertAudio.ALERT_AUDIO_VIBRATE_EXTRA,
-                    prefs.getBoolean(CellBroadcastSettings.KEY_ENABLE_ALERT_VIBRATE +
-                    message.getSubId(), true));
+                    prefs.getBoolean(CellBroadcastSettings.KEY_ENABLE_ALERT_VIBRATE, true));
         }
 
         String messageBody = message.getMessageBody();
